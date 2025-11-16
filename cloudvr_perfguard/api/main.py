@@ -18,9 +18,20 @@ from pydantic import BaseModel, Field
 # Add project root to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from config.logging_config import get_logger, setup_logging
+from config.constants import (
+    API_HOST,
+    API_PORT,
+    BUILD_STORAGE_PATH,
+    DEFAULT_GPU_TYPES,
+    SUPPORTED_PLATFORMS,
+)
 from core.database import DatabaseManager
 from core.performance_tester import VRPerformanceTester
 from core.regression_detector import RegressionDetector
+
+# Initialize logger
+logger = get_logger(__name__)
 
 app = FastAPI(
     title="CloudVR-PerfGuard API",
@@ -72,34 +83,51 @@ class RegressionTestResult(BaseModel):
 
 @app.on_event("startup")
 async def startup_event():
+    """Initialize application components on startup"""
     global performance_tester, regression_detector, db_manager
 
     try:
+        # Setup logging first
+        setup_logging()
+        logger.info("Starting CloudVR-PerfGuard API initialization")
+
         # Initialize core components
         db_manager = DatabaseManager()
         await db_manager.initialize()
+        logger.info("Database manager initialized")
 
         performance_tester = VRPerformanceTester()
         await performance_tester.initialize()
+        logger.info("Performance tester initialized")
 
         regression_detector = RegressionDetector(db_manager)
+        logger.info("Regression detector initialized")
 
-        print("INFO: CloudVR-PerfGuard API initialized successfully")
+        logger.info("CloudVR-PerfGuard API initialized successfully")
 
     except Exception as e:
-        print(f"FATAL: Failed to initialize CloudVR-PerfGuard: {e}")
-        import traceback
-
-        traceback.print_exc()
+        logger.critical("Failed to initialize CloudVR-PerfGuard", exc_info=True)
+        raise
 
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    if performance_tester:
-        await performance_tester.cleanup()
-    if db_manager:
-        await db_manager.close()
-    print("INFO: CloudVR-PerfGuard API shutdown complete")
+    """Cleanup resources on shutdown"""
+    logger.info("Starting CloudVR-PerfGuard API shutdown")
+
+    try:
+        if performance_tester:
+            await performance_tester.cleanup()
+            logger.info("Performance tester cleaned up")
+
+        if db_manager:
+            await db_manager.close()
+            logger.info("Database connection closed")
+
+        logger.info("CloudVR-PerfGuard API shutdown complete")
+
+    except Exception as e:
+        logger.error("Error during shutdown", exc_info=True)
 
 
 # --- API Endpoints ---
@@ -107,7 +135,51 @@ async def shutdown_event():
 
 @app.get("/health")
 async def health_check():
-    return {"status": "healthy"}
+    """
+    Health check endpoint with actual service status
+    Returns 200 if all services are healthy, 503 otherwise
+    """
+    health_status = {
+        "status": "healthy",
+        "timestamp": datetime.utcnow().isoformat(),
+        "services": {}
+    }
+
+    is_healthy = True
+
+    # Check database connection
+    try:
+        if db_manager and db_manager.connection:
+            # Try a simple query
+            await db_manager.connection.execute("SELECT 1")
+            health_status["services"]["database"] = "healthy"
+        else:
+            health_status["services"]["database"] = "not_initialized"
+            is_healthy = False
+    except Exception as e:
+        health_status["services"]["database"] = f"unhealthy: {str(e)}"
+        is_healthy = False
+        logger.error("Database health check failed", exc_info=True)
+
+    # Check performance tester
+    if performance_tester:
+        health_status["services"]["performance_tester"] = "healthy"
+    else:
+        health_status["services"]["performance_tester"] = "not_initialized"
+        is_healthy = False
+
+    # Check regression detector
+    if regression_detector:
+        health_status["services"]["regression_detector"] = "healthy"
+    else:
+        health_status["services"]["regression_detector"] = "not_initialized"
+        is_healthy = False
+
+    if not is_healthy:
+        health_status["status"] = "unhealthy"
+        raise HTTPException(status_code=503, detail=health_status)
+
+    return health_status
 
 
 @app.get("/")
@@ -121,7 +193,7 @@ async def root():
 
 @app.get("/status")
 async def get_status():
-    """Get API and service status"""
+    """Get detailed API and service status"""
     status = {
         "api_status": "OPERATIONAL",
         "services": {
@@ -133,8 +205,8 @@ async def get_status():
             ),
             "database": "connected" if db_manager else "not_connected",
         },
-        "supported_platforms": ["windows", "linux", "android"],
-        "supported_gpu_types": ["T4", "L4", "A100"],
+        "supported_platforms": SUPPORTED_PLATFORMS,
+        "supported_gpu_types": DEFAULT_GPU_TYPES,
         "timestamp": datetime.utcnow().isoformat(),
     }
     return status
@@ -210,8 +282,8 @@ async def submit_build_for_testing(
         }
 
     except Exception as e:
-        print(f"ERROR in submit_build: {e}")
-        raise HTTPException(status_code=500, detail=f"Failed to submit build: {str(e)}")
+        logger.error(f"Failed to submit build for {app_name} v{build_version}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to submit build. Please try again.")
 
 
 @app.get("/job_status/{job_id}")
@@ -240,9 +312,9 @@ async def get_job_status(job_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"ERROR in get_job_status: {e}")
+        logger.error(f"Failed to get job status for {job_id}", exc_info=True)
         raise HTTPException(
-            status_code=500, detail=f"Failed to get job status: {str(e)}"
+            status_code=500, detail="Failed to get job status. Please try again."
         )
 
 
@@ -273,9 +345,9 @@ async def get_regression_report(job_id: str):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"ERROR in get_regression_report: {e}")
+        logger.error(f"Failed to generate regression report for {job_id}", exc_info=True)
         raise HTTPException(
-            status_code=500, detail=f"Failed to generate report: {str(e)}"
+            status_code=500, detail="Failed to generate report. Please try again."
         )
 
 
@@ -292,8 +364,9 @@ async def get_regression_report_html(job_id: str):
         return HTMLResponse(content=html_content)
 
     except Exception as e:
+        logger.error("Failed to generate HTML report", exc_info=True)
         raise HTTPException(
-            status_code=500, detail=f"Failed to generate HTML report: {str(e)}"
+            status_code=500, detail="Failed to generate HTML report. Please try again."
         )
 
 
@@ -309,9 +382,9 @@ async def get_app_baselines(app_name: str):
         return {"app_name": app_name, "baselines": baselines}
 
     except Exception as e:
-        print(f"ERROR in get_app_baselines: {e}")
+        logger.error(f"Failed to get baselines for app {app_name}", exc_info=True)
         raise HTTPException(
-            status_code=500, detail=f"Failed to get baselines: {str(e)}"
+            status_code=500, detail="Failed to get baselines. Please try again."
         )
 
 
@@ -321,22 +394,54 @@ async def get_app_baselines(app_name: str):
 async def store_build_file(
     file: UploadFile, app_name: str, build_version: str, job_id: str
 ) -> str:
-    """Store uploaded build file and return path"""
-    # TODO: Implement GCS storage
-    # For now, store locally
-    storage_dir = f"/tmp/cloudvr_builds/{app_name}/{build_version}"
-    os.makedirs(storage_dir, exist_ok=True)
+    """
+    Store uploaded build file and return path
 
-    file_path = f"{storage_dir}/{file.filename}"
-    with open(file_path, "wb") as f:
-        content = await file.read()
-        f.write(content)
+    Args:
+        file: Uploaded file
+        app_name: Application name
+        build_version: Build version
+        job_id: Unique job ID
 
-    return file_path
+    Returns:
+        Path to stored file
+
+    Raises:
+        Exception: If file storage fails
+    """
+    try:
+        # Sanitize filename to prevent path traversal
+        safe_filename = os.path.basename(file.filename)
+
+        # Use configured storage path
+        storage_dir = os.path.join(BUILD_STORAGE_PATH, app_name, build_version)
+        os.makedirs(storage_dir, exist_ok=True)
+
+        file_path = os.path.join(storage_dir, safe_filename)
+
+        # Write file
+        with open(file_path, "wb") as f:
+            content = await file.read()
+            f.write(content)
+
+        logger.info(f"Stored build file: {file_path} (job_id: {job_id})")
+        return file_path
+
+    except Exception as e:
+        logger.error(f"Failed to store build file for job {job_id}", exc_info=True)
+        raise
 
 
 async def queue_performance_test(job_id: str, build_path: str, config: Dict[str, Any]):
-    """Queue performance test for execution"""
+    """
+    Queue performance test for execution
+
+    Args:
+        job_id: Unique job identifier
+        build_path: Path to build file
+        config: Test configuration
+    """
+    logger.info(f"Queuing performance test for job {job_id}")
     # TODO: Implement proper async task queue (Celery, Cloud Tasks, etc.)
     # For now, start background task
     asyncio.create_task(run_performance_test_background(job_id, build_path, config))
@@ -345,13 +450,23 @@ async def queue_performance_test(job_id: str, build_path: str, config: Dict[str,
 async def run_performance_test_background(
     job_id: str, build_path: str, config: Dict[str, Any]
 ):
-    """Run performance test in background"""
+    """
+    Run performance test in background
+
+    Args:
+        job_id: Unique job identifier
+        build_path: Path to build file
+        config: Test configuration
+    """
     try:
+        logger.info(f"Starting performance test for job {job_id}")
+
         # Update job status
         await db_manager.update_job_status(job_id, "running")
 
         # Run performance test
         results = await performance_tester.run_test(build_path, config)
+        logger.info(f"Performance test completed for job {job_id}")
 
         # Store results
         await db_manager.store_performance_results(job_id, results)
@@ -359,13 +474,15 @@ async def run_performance_test_background(
         # If this is a regression test, run regression analysis
         job_data = await db_manager.get_test_job(job_id)
         if job_data["submission_type"] == "regression_test":
+            logger.info(f"Running regression analysis for job {job_id}")
             await regression_detector.analyze_regression(job_id)
 
         # Update job status
         await db_manager.update_job_status(job_id, "completed")
+        logger.info(f"Job {job_id} completed successfully")
 
     except Exception as e:
-        print(f"ERROR in background performance test {job_id}: {e}")
+        logger.error(f"Performance test failed for job {job_id}", exc_info=True)
         await db_manager.update_job_status(job_id, "failed", error=str(e))
 
 

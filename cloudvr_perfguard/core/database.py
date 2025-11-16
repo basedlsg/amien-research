@@ -13,6 +13,13 @@ from typing import Any, Dict, List, Optional
 
 import aiosqlite
 
+# Import logging from config
+import sys
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from config.logging_config import get_logger
+
+logger = get_logger(__name__)
+
 
 class DatabaseManager:
     """
@@ -43,10 +50,10 @@ class DatabaseManager:
             # Create tables
             await self._create_tables()
 
-            print(f"INFO: Database initialized at {self.db_path}")
+            logger.info(f"Database initialized at {self.db_path}")
 
         except Exception as e:
-            print(f"ERROR: Failed to initialize database: {e}")
+            logger.error(f"Failed to initialize database at {self.db_path}", exc_info=True)
             raise
 
     async def _create_tables(self):
@@ -202,7 +209,7 @@ class DatabaseManager:
             await self.connection.commit()
             return True
         except Exception as e:
-            print(f"ERROR storing evolved function {function_id}: {e}")
+            logger.error(f"Failed to store evolved function {function_id}", exc_info=True)
             return False
 
     async def get_evolved_function(self, function_id: str) -> Optional[Dict[str, Any]]:
@@ -223,7 +230,7 @@ class DatabaseManager:
                 func_data["metadata"] = json.loads(func_data["metadata"])
             return func_data
         except Exception as e:
-            print(f"ERROR getting evolved function {function_id}: {e}")
+            logger.error(f"Failed to get evolved function {function_id}", exc_info=True)
             return None
 
     async def get_evolved_functions_for_job(self, job_id: str) -> List[Dict[str, Any]]:
@@ -246,7 +253,7 @@ class DatabaseManager:
                 functions.append(func_data)
             return functions
         except Exception as e:
-            print(f"ERROR getting evolved functions for job {job_id}: {e}")
+            logger.error(f"Failed to get evolved functions for job {job_id}", exc_info=True)
             return []
 
     async def store_ai_paper(
@@ -290,7 +297,7 @@ class DatabaseManager:
             await self.connection.commit()
             return True
         except Exception as e:
-            print(f"ERROR storing AI paper {paper_id}: {e}")
+            logger.error(f"Failed to store AI paper {paper_id}", exc_info=True)
             return False
 
     async def get_ai_paper(self, paper_id: str) -> Optional[Dict[str, Any]]:
@@ -309,7 +316,7 @@ class DatabaseManager:
             paper_data = dict(zip(columns, row))
             return paper_data
         except Exception as e:
-            print(f"ERROR getting AI paper {paper_id}: {e}")
+            logger.error(f"Failed to get AI paper {paper_id}", exc_info=True)
             return None
 
     async def get_ai_papers_for_job(self, job_id: str) -> List[Dict[str, Any]]:
@@ -329,7 +336,7 @@ class DatabaseManager:
                 papers.append(dict(zip(columns, row_data)))
             return papers
         except Exception as e:
-            print(f"ERROR getting AI papers for job {job_id}: {e}")
+            logger.error(f"Failed to get AI papers for job {job_id}", exc_info=True)
             return []
 
     async def update_ai_paper_status(
@@ -380,7 +387,7 @@ class DatabaseManager:
             await self.connection.commit()
             return True
         except Exception as e:
-            print(f"ERROR updating AI paper {paper_id}: {e}")
+            logger.error(f"Failed to update AI paper {paper_id}", exc_info=True)
             return False
 
     async def create_test_job(
@@ -424,7 +431,7 @@ class DatabaseManager:
             return True
 
         except Exception as e:
-            print(f"ERROR creating test job {job_id}: {e}")
+            logger.error(f"Failed to create test job {job_id}", exc_info=True)
             return False
 
     async def get_test_job(self, job_id: str) -> Optional[Dict[str, Any]]:
@@ -453,7 +460,7 @@ class DatabaseManager:
             return job_data
 
         except Exception as e:
-            print(f"ERROR getting test job {job_id}: {e}")
+            logger.error(f"Failed to get test job {job_id}", exc_info=True)
             return None
 
     async def update_job_status(
@@ -491,7 +498,7 @@ class DatabaseManager:
             return True
 
         except Exception as e:
-            print(f"ERROR updating job status for {job_id}: {e}")
+            logger.error(f"Failed to update job status for {job_id}", exc_info=True)
             return False
 
     async def store_performance_results(
@@ -523,7 +530,7 @@ class DatabaseManager:
             return True
 
         except Exception as e:
-            print(f"ERROR storing performance results for {job_id}: {e}")
+            logger.error(f"Failed to store performance results for {job_id}", exc_info=True)
             return False
 
     async def get_performance_results(self, job_id: str) -> Optional[Dict[str, Any]]:
@@ -557,7 +564,7 @@ class DatabaseManager:
             return results_data
 
         except Exception as e:
-            print(f"ERROR getting performance results for {job_id}: {e}")
+            logger.error(f"Failed to get performance results for {job_id}", exc_info=True)
             return None
 
     async def store_regression_analysis(
@@ -588,7 +595,7 @@ class DatabaseManager:
             return True
 
         except Exception as e:
-            print(f"ERROR storing regression analysis for {job_id}: {e}")
+            logger.error(f"Failed to store regression analysis for {job_id}", exc_info=True)
             return False
 
     async def get_regression_analysis(self, job_id: str) -> Optional[Dict[str, Any]]:
@@ -623,7 +630,7 @@ class DatabaseManager:
             return analysis_data
 
         except Exception as e:
-            print(f"ERROR getting regression analysis for {job_id}: {e}")
+            logger.error(f"Failed to get regression analysis for {job_id}", exc_info=True)
             return None
 
     async def get_baseline_job(
@@ -658,7 +665,7 @@ class DatabaseManager:
             return job_data
 
         except Exception as e:
-            print(f"ERROR getting baseline job for {app_name} v{baseline_version}: {e}")
+            logger.error(f"Failed to get baseline job for {app_name} v{baseline_version}", exc_info=True)
             return None
 
     async def get_app_baselines(self, app_name: str) -> List[Dict[str, Any]]:
@@ -689,7 +696,7 @@ class DatabaseManager:
             return baselines
 
         except Exception as e:
-            print(f"ERROR getting baselines for {app_name}: {e}")
+            logger.error(f"Failed to get baselines for {app_name}", exc_info=True)
             return []
 
     async def get_recent_jobs(self, limit: int = 50) -> List[Dict[str, Any]]:
@@ -724,7 +731,7 @@ class DatabaseManager:
             return jobs
 
         except Exception as e:
-            print(f"ERROR getting recent jobs: {e}")
+            logger.error("Failed to get recent jobs", exc_info=True)
             return []
 
     async def get_app_performance_history(
@@ -767,11 +774,11 @@ class DatabaseManager:
             return history
 
         except Exception as e:
-            print(f"ERROR getting performance history for {app_name}: {e}")
+            logger.error(f"Failed to get performance history for {app_name}", exc_info=True)
             return []
 
     async def close(self):
         """Close database connection"""
         if self.connection:
             await self.connection.close()
-            print("INFO: Database connection closed")
+            logger.info("Database connection closed")
